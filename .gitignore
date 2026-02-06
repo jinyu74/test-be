@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+.env
+.env.*
+.idea/
+.vscode/
+.DS_Store
+
+# Alembic
+alembic.ini.bak
+
+# Python build artifacts
+build/
+dist/
+
+# Logs
+*.log

@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: scripts/create-app <service-name> [--skip-install]"
+}
+
+if [[ ${#} -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+service_name="$1"
+skip_install="false"
+
+if [[ "${2:-}" == "--skip-install" ]]; then
+  skip_install="true"
+fi
+
+if [[ "$service_name" == *" "* ]]; then
+  echo "Service name must not contain spaces."
+  exit 1
+fi
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+source_dir="$repo_root/apps/api"
+target_dir="$repo_root/apps/$service_name"
+
+if [[ ! -d "$source_dir" ]]; then
+  echo "Source template not found: $source_dir"
+  exit 1
+fi
+
+if [[ -e "$target_dir" ]]; then
+  echo "Target already exists: $target_dir"
+  exit 1
+fi
+
+cp -R "$source_dir" "$target_dir"
+
+python - "$service_name" "$target_dir" <<'PY'
+from __future__ import annotations
+
+import pathlib
+import re
+import sys
+
+service_name = sys.argv[1]
+root = pathlib.Path(sys.argv[2])
+
+db_name = service_name.replace("-", "_")
+
+pyproject = root / "pyproject.toml"
+if pyproject.exists():
+    text = pyproject.read_text()
+    text = re.sub(r'^name\s*=\s*"[^"]+"', f'name = "{service_name}"', text, flags=re.M)
+    pyproject.write_text(text)
+
+env_file = root / ".env.example"
+if env_file.exists():
+    text = env_file.read_text()
+    text = re.sub(r'^APP_NAME=.*$', f'APP_NAME={service_name}', text, flags=re.M)
+    text = re.sub(r'^(DATABASE_URL=.*/)[^/]+$', rf'\1{db_name}', text, flags=re.M)
+    env_file.write_text(text)
+
+config_file = root / "app" / "core" / "config.py"
+if config_file.exists():
+    text = config_file.read_text()
+    text = re.sub(
+        r'APP_NAME",\s*"[^"]+"',
+        f'APP_NAME", "{service_name}"',
+        text,
+    )
+    text = re.sub(
+        r'postgresql\+asyncpg://[^\"]+/[^\"]+"',
+        f'postgresql+asyncpg://postgres:postgres@localhost:5432/{db_name}"',
+        text,
+    )
+    config_file.write_text(text)
+
+alembic_ini = root / "alembic.ini"
+if alembic_ini.exists():
+    text = alembic_ini.read_text()
+    text = re.sub(
+        r'(sqlalchemy.url\s*=\s*postgresql\+asyncpg://[^\"]+/)[^\n]+',
+        rf'\1{db_name}',
+        text,
+    )
+    alembic_ini.write_text(text)
+
+readme = root / "README.md"
+if readme.exists():
+    lines = readme.read_text().splitlines()
+    if lines:
+        if lines[0].startswith("# "):
+            lines[0] = f"# {service_name} API"
+        else:
+            lines.insert(0, f"# {service_name} API")
+    readme.write_text("\n".join(lines) + "\n")
+PY
+
+echo "Created API service: $target_dir"
+
+if [[ "$skip_install" == "true" ]]; then
+  echo "Skipped dependency install."
+  exit 0
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv not found. Skipping dependency install."
+  exit 0
+fi
+
+(
+  cd "$target_dir"
+  uv venv
+  uv sync --extra dev
+)
+
+echo "Dependencies installed with uv."

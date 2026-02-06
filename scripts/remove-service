@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: scripts/remove-service <service-name> [--force]"
+}
+
+if [[ ${#} -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+service_name="$1"
+force="false"
+
+if [[ "${2:-}" == "--force" ]]; then
+  force="true"
+fi
+
+if [[ "$service_name" == *"/"* ]] || [[ "$service_name" == *"\\"* ]] || [[ "$service_name" == *".."* ]]; then
+  echo "Invalid service name: $service_name"
+  exit 1
+fi
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+target_dir="$repo_root/apps/$service_name"
+
+if [[ ! -d "$target_dir" ]]; then
+  echo "Service not found: $target_dir"
+  exit 1
+fi
+
+if [[ "$force" != "true" ]]; then
+  echo "This will delete: $target_dir"
+  echo "Type the service name to confirm:"
+  read -r confirm
+  if [[ "$confirm" != "$service_name" ]]; then
+    echo "Aborted."
+    exit 1
+  fi
+fi
+
+rm -rf "$target_dir"
+
+echo "Removed service: $target_dir"
